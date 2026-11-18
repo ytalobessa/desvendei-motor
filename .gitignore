@@ -1,0 +1,7 @@
+node_modules/
+fila/
+*.mp4
+*.wav
+__pycache__/
+.env
+*.env
