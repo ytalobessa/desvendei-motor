@@ -14,11 +14,11 @@ const br = await puppeteer.launch({ executablePath: CHROME, headless: 'new',
   args: GPU ? ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-gpu-rasterization']
             : ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--disable-dev-shm-usage'] });
 const pg = await br.newPage();
-pg.on('pageerror', e => console.log('ERR', e.message));
+pg.on('pageerror', e => { console.log('ERR', e.message); if (!globalThis.__pronto) process.exit(1); });
 pg.on('console', m => { if (m.type() === 'error' || m.type() === 'warn') console.log('CONSOLE', m.text()); });
 await pg.setViewport({ width: 1080, height: 1920, deviceScaleFactor: 1 });
 await pg.goto(`http://localhost:${port}/index.html${GPU ? "?q=alta" : ""}`);
-await pg.waitForFunction('window.ready === true', { timeout: 180000 });
+await pg.waitForFunction('window.ready === true', { timeout: 180000 }); globalThis.__pronto = true;
 if (mode === 'stills') { fs.mkdirSync(`${ROOT}/stills`, { recursive: true });
   for (const t of a.split(',')) { await pg.evaluate(t => renderAt(t), +t); await pg.screenshot({ path: `${ROOT}/stills/s_${t}.jpg`, type: 'jpeg', quality: 88 }); }
 } else {
