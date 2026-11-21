@@ -10,6 +10,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 export { THREE };
 
 // ---------- utilidades ----------
@@ -30,11 +32,11 @@ const RS = (new URLSearchParams(location.search).get('q') === 'alta') ? 1.0 : 0.
 export const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
 renderer.setPixelRatio(1); renderer.setSize(Math.round(W * RS), Math.round(H * RS), false);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.VSMShadowMap;
-renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
-export const scene = new THREE.Scene(); scene.fog = new THREE.Fog(0xcde3f3, 80, 260);
+renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.08;
+export const scene = new THREE.Scene(); scene.fog = new THREE.Fog(0xdfe7ee, 35, 170);
 export const cam = new THREE.PerspectiveCamera(40, W / H, 0.05, 900);
-export const hemi = new THREE.HemisphereLight(0xe3f1ff, 0x7a9a55, 1.5); scene.add(hemi);
-export const sun = new THREE.DirectionalLight(0xffe2b8, 3.3); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.radius = 4; sun.shadow.blurSamples = 10;
+export const hemi = new THREE.HemisphereLight(0xeef4ff, 0xd9d2c3, 1.9); scene.add(hemi);
+export const sun = new THREE.DirectionalLight(0xfff3e2, 2.5); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.radius = 12; sun.shadow.blurSamples = 24;
 Object.assign(sun.shadow.camera, { left: -42, right: 42, top: 42, bottom: -42, near: 5, far: 160 }); sun.shadow.bias = -0.0004;
 sun.position.set(-30, 60, 40); sun.target.position.set(-6, 0, -2); scene.add(sun, sun.target);
 /** Centro da área com sombra (mude se a ação acontece longe da origem). */
@@ -131,24 +133,34 @@ export function posCarro(c, { x, z, dir = 1, chao = () => 0, amp = 0, xImpacto =
 
 // ---------- pessoas (com animação) ----------
 /** Personagem Kenney (mini-characters). Animações: idle, walk, sprint, jump, sit, crouch, emote-yes, emote-no, pick-up, interact-right... */
-export function pessoa(nome, altura = 1.75, extras = []) { const g = new THREE.Group(); scene.add(g); const src = GL['mini-characters/character-' + nome]; const m = SkeletonUtils.clone(src.scene); g.add(m);
+export function pessoaKenney(nome, altura = 1.75, extras = []) { const g = new THREE.Group(); scene.add(g); const src = GL['mini-characters/character-' + nome]; const m = SkeletonUtils.clone(src.scene); g.add(m);
   m.traverse(c => { if (c.isMesh) { c.castShadow = c.receiveShadow = true; c.frustumCulled = false; } });
   const bb = new THREE.Box3().setFromObject(m); const k = altura / bb.getSize(new THREE.Vector3()).y; m.scale.setScalar(k); m.position.y = -bb.min.y * k;
   const mixer = new THREE.AnimationMixer(m); const acts = {}; for (const n of ['idle', 'walk', ...extras]) { const cl = src.animations.find(a => a.name === n); if (cl) { acts[n] = mixer.clipAction(cl); acts[n].play(); acts[n].setEffectiveWeight(0); } }
   return { g, mixer, acts }; }
 /** Pose no tempo t: anim = 'idle' | 'walk' | outra carregada em extras. */
-export function pose(p, t, anim = 'idle') { for (const [n, a] of Object.entries(p.acts)) a.setEffectiveWeight(n === anim ? 1 : 0); p.mixer.setTime(t); }
+// pessoa: agora é um peão (estilo suave). Cor e chapéu saem do nome, para cada personagem ficar sempre igual.
+const PALETA = [[0x3d5fbf, 0x1f3a8a], [0xd0607a, 0xf2c230], [0x5aa86a, 0x2f6b3a], [0xe08a3c, 0xffffff], [0x8a6fd0, 0xf0f0f0], [0x4fa3b8, 0xe0503a]];
+export function pessoa(nome = 'a', altura = 1.75, extras = []) { let h = 0; for (const c of String(nome)) h = (h * 31 + c.charCodeAt(0)) >>> 0; const [cor, ch] = PALETA[h % PALETA.length];
+  return peao(cor, /worker|operario|eletric|pedreiro/.test(nome) ? 'capacete' : 'bone', altura, ch); }
+export function pose(p, t, anim = 'idle') {
+  if (!p.mixer || !p.acts || !Object.keys(p.acts).length) { if (!p.B) return; // peão: animação simples feita no código
+    if (anim === 'walk') { p.B.position.y = Math.abs(Math.sin(t * 9)) * 0.07; p.B.rotation.z = Math.sin(t * 9) * 0.09; p.B.rotation.x = 0.06; }
+    else if (anim.startsWith('interact') || anim.startsWith('emote')) { p.B.position.y = Math.abs(Math.sin(t * 6)) * 0.04; p.B.rotation.x = 0.12 + Math.sin(t * 6) * 0.06; p.B.rotation.z = 0; }
+    else { p.B.position.y = 0; p.B.rotation.x = 0; p.B.rotation.z = Math.sin(t * 1.6) * 0.02; p.B.scale.y = p.B.scale.x * (1 + Math.sin(t * 2.2) * 0.012); }
+    return; }
+  for (const [n, a] of Object.entries(p.acts)) a.setEffectiveWeight(n === anim ? 1 : 0); p.mixer.setTime(t); }
 
 // ---------- clima: dia / chuva / noite ----------
 const C = a => new THREE.Color(a);
-const DAY = { top: C(0x3f8be0), bot: C(0xdcefff), fog: C(0xcde3f3), hemi: 1.5, sun: 3.3 }, NIG = { top: C(0x14254a), bot: C(0x3a5486), fog: C(0x2a3c66), hemi: 0.45, sun: 0.35 }, RAINY = { top: C(0x7d8894), bot: C(0xb9c2ca), fog: C(0xaab3bb), hemi: 1.1, sun: 0.9 };
+const DAY = { top: C(0x6f9fd6), bot: C(0xe2ecf4), fog: C(0xdfe7ee), hemi: 1.9, sun: 2.5 }, NIG = { top: C(0x14254a), bot: C(0x3a5486), fog: C(0x2a3c66), hemi: 0.45, sun: 0.35 }, RAINY = { top: C(0x7d8894), bot: C(0xb9c2ca), fog: C(0xaab3bb), hemi: 1.1, sun: 0.9 };
 const rainN = 900; const rain = new THREE.InstancedMesh(new THREE.BoxGeometry(0.02, 0.7, 0.02), new THREE.MeshBasicMaterial({ color: 0xdfefff, transparent: true, opacity: 0.55 }), rainN); scene.add(rain); rain.frustumCulled = false;
 const rainSeed = Array.from({ length: rainN }, () => [R(), R(), R(), R()]); const M4 = new THREE.Matrix4(), Q = new THREE.Quaternion(), V = new THREE.Vector3(), S = new THREE.Vector3(), E = new THREE.Euler();
 export const luzesNoite = []; // materiais emissivos que acendem à noite (postes, janelas)
 /** noite e chuva de 0 a 1. */
 export function clima(t, noite = 0, chuva = 0) {
   const mix = k => DAY[k].clone ? DAY[k].clone().lerp(RAINY[k], chuva).lerp(NIG[k], noite) : lerp(lerp(DAY[k], RAINY[k], chuva), NIG[k], noite);
-  skyU.top.value.copy(mix('top')); skyU.bot.value.copy(mix('bot')); scene.fog.color.copy(mix('fog')); hemi.intensity = mix('hemi'); sun.intensity = mix('sun'); sun.color.setHex(noite > .5 ? 0xa8bcff : 0xffe2b8);
+  skyU.top.value.copy(mix('top')); skyU.bot.value.copy(mix('bot')); scene.fog.color.copy(mix('fog')); hemi.intensity = mix('hemi'); sun.intensity = mix('sun'); sun.color.setHex(noite > .5 ? 0xa8bcff : 0xfff3e2);
   luzesNoite.forEach(m => m.emissiveIntensity = noite * 3); cloudM.emissiveIntensity = 0.25 * (1 - noite); cloudM.color.setHex(noite > .5 ? 0x4a5878 : (chuva > .5 ? 0xc9d0d6 : 0xffffff)); nuvens.position.x = t * 0.4;
   rain.visible = chuva > 0.01; if (rain.visible) { const cp = cam.position; for (let i = 0; i < rainN; i++) { const [a, b, , d] = rainSeed[i]; const ph = (t * 1.6 + d) % 1; V.set(cp.x - 14 + a * 28, 14 - ph * 16, cp.z - 16 + b * 22); if (i / rainN > chuva) V.y = -50; M4.compose(V, Q.identity(), S.set(1, 1, 1)); rain.setMatrixAt(i, M4); } rain.instanceMatrix.needsUpdate = true; } }
 
@@ -184,9 +196,12 @@ function overlays(t) { const capEl = $('cap'), lab = $('lab'), ctaEl = $('cta');
 
 // ---------- render com desfoque de movimento ----------
 const composer = new EffectComposer(renderer); composer.setPixelRatio(1); composer.setSize(Math.round(W * RS), Math.round(H * RS));
-composer.addPass(new RenderPass(scene, cam)); composer.addPass(new OutputPass()); composer.addPass(new SMAAPass(Math.round(W * RS), Math.round(H * RS)));
+composer.addPass(new RenderPass(scene, cam));
+const gtao = new GTAOPass(scene, cam, Math.round(W * RS), Math.round(H * RS)); gtao.blendIntensity = 1.0; gtao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.5, thickness: 1.2, scale: 1.0, samples: 16 }); composer.addPass(gtao);
+export const bokeh = new BokehPass(scene, cam, { focus: 15, aperture: 0.0015, maxblur: 0.0045 }); composer.addPass(bokeh);
+composer.addPass(new OutputPass()); composer.addPass(new SMAAPass(Math.round(W * RS), Math.round(H * RS)));
 const glc = renderer.domElement; let octx = null;
-function aplicar(t) { const c = camPose(t); cam.position.set(...c.p); cam.lookAt(...c.t); cam.fov = c.f; cam.updateProjectionMatrix(); CFG.atualizar(t); }
+function aplicar(t) { const c = camPose(t); cam.position.set(...c.p); cam.lookAt(...c.t); bokeh.uniforms.focus.value = Math.hypot(c.p[0] - c.t[0], c.p[1] - c.t[1], c.p[2] - c.t[2]); cam.fov = c.f; cam.updateProjectionMatrix(); CFG.atualizar(t); }
 function camSpeed(t) { const a = camPose(t), b = camPose(t - 1 / 30); return Math.max(Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1], a.p[2] - b.p[2]), Math.hypot(a.t[0] - b.t[0], a.t[1] - b.t[1], a.t[2] - b.t[2])); }
 function renderAt(t) { const sp = camSpeed(t); const n = sp > 0.9 ? 5 : sp > 0.45 ? 3 : 1;
   if (n === 1) { aplicar(t); composer.render(); octx.globalAlpha = 1; octx.drawImage(glc, 0, 0, W, H); }
@@ -209,4 +224,18 @@ export function iniciar(cfg) { CFG = cfg; SEG = cfg.seg; octx = $('out').getCont
   BADGES = (cfg.badges || []).map(o => { const d = document.createElement('div'); d.className = 'b ' + (o.c || ''); d.textContent = o.t; $('bs').appendChild(d); return { ...o, d }; });
   window.renderAt = renderAt;
   fetch('words.json').then(r => r.json()).then(w => { WORDS = w; return document.fonts.load('800 50px M'); }).then(() => document.fonts.load('900 50px M'))
-    .then(() => { TEXS.forEach(t => t.userData.redraw()); renderAt(0); window.ready = true; }); }
+    .then(() => { suavizar(); TEXS.forEach(t => t.userData.redraw()); renderAt(0); window.ready = true; }); }
+// estilo suave: cores mais claras e menos saturadas em todos os materiais (inclusive texturas dos modelos)
+function suavizar() { const feitos = new Set(); scene.traverse(o => { const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : []; for (const m of ms) { if (feitos.has(m) || !m.isMeshStandardMaterial || m.userData.cru) continue; feitos.add(m);
+  m.roughness = Math.max(m.roughness ?? 1, 0.65); m.metalness = Math.min(m.metalness ?? 0, 0.2);
+  m.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\n float lum_ = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)); diffuseColor.rgb = mix(vec3(lum_), diffuseColor.rgb, 0.86); diffuseColor.rgb = diffuseColor.rgb * 0.9 + 0.07;'); }; m.needsUpdate = true; } }); }
+// personagem peão (cabeça redonda, corpo em cone, chapéu), com contorno
+export function peao(cor = 0x4f6fd0, chapeu = 'bone', altura = 1.7, corChapeu = 0x2f4fb0) { const g = new THREE.Group(); scene.add(g); const k = altura / 1.7; const B = new THREE.Group(); B.scale.setScalar(k); g.add(B);
+  const corpoM = new THREE.MeshStandardMaterial({ color: cor, roughness: .7 }), peleM = new THREE.MeshStandardMaterial({ color: 0xf0d2b0, roughness: .8 }), chM = new THREE.MeshStandardMaterial({ color: corChapeu, roughness: .6 });
+  const perfil = [[0, 0], [0.34, 0], [0.36, 0.06], [0.3, 0.14], [0.2, 0.55], [0.13, 1.0], [0.16, 1.08], [0.1, 1.14], [0, 1.15]].map(([x, y]) => new THREE.Vector2(x, y));
+  const corpo = new THREE.Mesh(new THREE.LatheGeometry(perfil, 32), corpoM); const cabeca = new THREE.Mesh(new THREE.SphereGeometry(0.24, 32, 20), peleM); cabeca.position.y = 1.36; B.add(corpo, cabeca);
+  if (chapeu === 'bone') { const c = new THREE.Mesh(new THREE.SphereGeometry(0.25, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2), chM); c.position.y = 1.4; const aba = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.025, 24, 1, false, -Math.PI / 2, Math.PI), chM); aba.position.set(0, 1.41, 0.17); aba.scale.z = 1.3; B.add(c, aba); }
+  if (chapeu === 'capacete') { const c = new THREE.Mesh(new THREE.SphereGeometry(0.27, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2), chM); c.position.y = 1.42; const aba = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.03, 32), chM); aba.position.y = 1.42; B.add(c, aba); }
+  const borda = new THREE.MeshBasicMaterial({ color: 0x1a1a1a, side: THREE.BackSide }); borda.userData.cru = true;
+  B.children.slice().forEach(m => { m.castShadow = true; m.receiveShadow = true; const o = new THREE.Mesh(m.geometry, borda); o.position.copy(m.position); o.scale.copy(m.scale).multiplyScalar(1.06); B.add(o); });
+  return { g, B, acts: {}, mixer: { setTime() {} } }; }
